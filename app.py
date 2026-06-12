@@ -18,6 +18,7 @@ SCOPES = [
 ]
 
 COLUMNS = ["user_id", "password", "word", "meaning", "count", "created_at", "updated_at"]
+ACCOUNT_MARKER = "__ACCOUNT__"
 
 
 # --------------------
@@ -84,10 +85,43 @@ def similarity(a, b):
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
 
+def user_exists(all_df, user_id):
+    return not all_df[all_df["user_id"] == user_id].empty
+
+
+def valid_login(all_df, user_id, password):
+    matched = all_df[
+        (all_df["user_id"] == user_id) &
+        (all_df["password"] == password)
+    ]
+    return not matched.empty
+
+
+def create_user(all_df, user_id, password):
+    new_row = {
+        "user_id": user_id,
+        "password": password,
+        "word": ACCOUNT_MARKER,
+        "meaning": "",
+        "count": 0,
+        "created_at": now_text(),
+        "updated_at": now_text()
+    }
+
+    all_df = pd.concat([all_df, pd.DataFrame([new_row])], ignore_index=True)
+    save_all_data(all_df)
+
+
 def get_user_df(all_df, user_id, password):
     user_df = all_df[
         (all_df["user_id"] == user_id) &
         (all_df["password"] == password)
+    ].copy()
+
+    # アカウント作成用の隠し行は辞書一覧から除外
+    user_df = user_df[
+        (user_df["word"] != ACCOUNT_MARKER) &
+        (user_df["word"].astype(str).str.strip() != "")
     ].copy()
 
     return user_df
@@ -108,7 +142,6 @@ def get_suggestions(query, dataframe):
         is_partial_match = query_lower in word_lower or word_lower in query_lower
         score = similarity(query_lower, word_lower)
 
-        # サジェストを厳しめにする
         if is_partial_match or score >= 0.55:
             suggestions.append((i, word, score))
 
@@ -251,37 +284,74 @@ st.write("自分専用の英語辞書です。")
 
 st.divider()
 
+all_df = load_all_data()
+
 # --------------------
-# ログイン
+# ログイン・新規登録
 # --------------------
 
-# 未ログインならログイン画面を出す
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
 if not st.session_state["logged_in"]:
-    st.subheader("ログイン")
+    tab_login, tab_signup = st.tabs(["ログイン", "新規登録"])
 
-    login_user_id = st.text_input("ユーザーID")
-    login_password = st.text_input("パスワード", type="password")
+    with tab_login:
+        st.subheader("ログイン")
 
-    if st.button("ログイン"):
-        if login_user_id.strip() and login_password.strip():
-            st.session_state["logged_in"] = True
-            st.session_state["user_id"] = login_user_id.strip()
-            st.session_state["password"] = login_password.strip()
-            st.rerun()
-        else:
-            st.warning("ユーザーIDとパスワードを入力してください。")
+        login_user_id = st.text_input("ユーザーID", key="login_user_id")
+        login_password = st.text_input("パスワード", type="password", key="login_password")
+
+        if st.button("ログイン"):
+            user_id_input = login_user_id.strip()
+            password_input = login_password.strip()
+
+            if not user_id_input or not password_input:
+                st.warning("ユーザーIDとパスワードを入力してください。")
+            elif not user_exists(all_df, user_id_input):
+                st.warning("このユーザーIDはまだ登録されていません。新規登録してください。")
+            elif not valid_login(all_df, user_id_input, password_input):
+                st.warning("パスワードが違います。")
+            else:
+                st.session_state["logged_in"] = True
+                st.session_state["user_id"] = user_id_input
+                st.session_state["password"] = password_input
+                st.rerun()
+
+    with tab_signup:
+        st.subheader("新規登録")
+
+        new_user_id = st.text_input("新しいユーザーID", key="new_user_id")
+        new_password = st.text_input("新しいパスワード", type="password", key="new_password")
+        new_password_confirm = st.text_input("パスワード確認", type="password", key="new_password_confirm")
+
+        if st.button("登録する"):
+            user_id_input = new_user_id.strip()
+            password_input = new_password.strip()
+            password_confirm_input = new_password_confirm.strip()
+
+            if not user_id_input or not password_input or not password_confirm_input:
+                st.warning("すべて入力してください。")
+            elif user_exists(all_df, user_id_input):
+                st.warning("このユーザーIDはすでに使われています。")
+            elif password_input != password_confirm_input:
+                st.warning("パスワードが一致していません。")
+            elif len(password_input) < 4:
+                st.warning("パスワードは4文字以上にしてください。")
+            else:
+                create_user(all_df, user_id_input, password_input)
+                st.success("登録できました。そのままログインします。")
+
+                st.session_state["logged_in"] = True
+                st.session_state["user_id"] = user_id_input
+                st.session_state["password"] = password_input
+                st.rerun()
 
     st.stop()
 
-# ログイン済みならここから先に進む
+# ログイン済み
 user_id = st.session_state["user_id"]
 password = st.session_state["password"]
-
-all_df = load_all_data()
-user_df = get_user_df(all_df, user_id, password)
 
 col_login1, col_login2 = st.columns([4, 1])
 
@@ -302,6 +372,7 @@ st.divider()
 word_input = st.text_input("単語・熟語を入力してください").strip()
 
 if word_input:
+    all_df = load_all_data()
     user_df = get_user_df(all_df, user_id, password)
 
     suggestions = get_suggestions(word_input, user_df)
@@ -346,6 +417,7 @@ if word_input:
 
         if st.button("新規登録する"):
             if meaning_input.strip():
+                all_df = load_all_data()
                 add_word(all_df, user_id, password, word_input, meaning_input)
                 st.success(f"{word_input} を登録しました。")
                 st.rerun()
@@ -357,14 +429,16 @@ if word_input:
 # 上部の単語詳細表示
 # --------------------
 
+all_df = load_all_data()
+
 if "active_index" in st.session_state:
     active_index = st.session_state["active_index"]
 
     if active_index in all_df.index:
-        # 念のため、ログイン中のユーザーの単語だけ表示
         if (
             all_df.loc[active_index, "user_id"] == user_id and
-            all_df.loc[active_index, "password"] == password
+            all_df.loc[active_index, "password"] == password and
+            all_df.loc[active_index, "word"] != ACCOUNT_MARKER
         ):
             show_detail(all_df, active_index)
 
