@@ -528,15 +528,15 @@ if user_df.empty:
     st.write("まだ単語が登録されていません。")
 
 else:
-sort_mode = st.radio(
-    "並び替え",
-    [
-        "アルファベット順",
-        "登録順（新しい順）",
-        "確認回数が多い順"
-    ],
-    horizontal=True
-)
+    sort_mode = st.radio(
+        "並び替え",
+        [
+            "アルファベット順",
+            "登録順（新しい順）",
+            "確認回数が多い順"
+        ],
+        horizontal=True
+    )
 
     sorted_user_df = get_sorted_df(user_df, sort_mode)
 
