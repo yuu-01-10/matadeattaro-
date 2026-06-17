@@ -154,8 +154,36 @@ def get_sorted_df(dataframe, sort_mode):
         return dataframe.sort_values(
             ["count", "word"],
             ascending=[False, True],
-            key=lambda col: col.str.lower() if col.name == "word" else col
+            key=lambda col: (
+                col.str.lower()
+                if col.name == "word"
+                else col
+            )
         )
+
+    elif sort_mode == "登録順（新しい順）":
+        sorted_df = dataframe.copy()
+
+        sorted_df["_created_sort"] = pd.to_datetime(
+            sorted_df["created_at"],
+            errors="coerce"
+        )
+
+        sorted_df["_word_sort"] = (
+            sorted_df["word"]
+            .astype(str)
+            .str.lower()
+        )
+
+        sorted_df = sorted_df.sort_values(
+            ["_created_sort", "_word_sort"],
+            ascending=[False, True]
+        )
+
+        return sorted_df.drop(
+            columns=["_created_sort", "_word_sort"]
+        )
+
     else:
         return dataframe.sort_values(
             "word",
@@ -167,6 +195,11 @@ def open_word(index, edit=False):
     st.session_state["active_index"] = int(index)
     st.session_state["edit_open"] = edit
 
+def clear_search():
+    st.session_state["word_input"] = ""
+    st.session_state.pop("active_index", None)
+    st.session_state.pop("last_search_word", None)
+    st.session_state["edit_open"] = False
 
 def update_row(all_df, index, word, meaning, count):
     all_df.loc[index, "word"] = word.strip()
@@ -192,8 +225,17 @@ def add_word(all_df, user_id, password, word, meaning):
         "updated_at": now_text()
     }
 
-    all_df = pd.concat([all_df, pd.DataFrame([new_row])], ignore_index=True)
+    all_df = pd.concat(
+        [all_df, pd.DataFrame([new_row])],
+        ignore_index=True
+    )
+
+    # 新しく登録した単語の行番号
+    new_index = all_df.index[-1]
+
     save_all_data(all_df)
+
+    return int(new_index)
 
 
 def increment_count(all_df, index):
@@ -369,7 +411,23 @@ st.divider()
 # 検索・登録
 # --------------------
 
-word_input = st.text_input("単語・熟語を入力してください").strip()
+search_col, clear_col = st.columns([5, 1])
+
+with search_col:
+    word_input = st.text_input(
+        "単語・熟語を入力してください",
+        key="word_input"
+    ).strip()
+
+with clear_col:
+    st.write("")
+    st.write("")
+
+    st.button(
+        "クリア",
+        on_click=clear_search,
+        use_container_width=True
+    )
 
 if word_input:
     all_df = load_all_data()
@@ -415,14 +473,27 @@ if word_input:
 
         meaning_input = st.text_area("意味を入力してください")
 
-        if st.button("新規登録する"):
-            if meaning_input.strip():
-                all_df = load_all_data()
-                add_word(all_df, user_id, password, word_input, meaning_input)
-                st.success(f"{word_input} を登録しました。")
-                st.rerun()
-            else:
-                st.warning("意味を入力してください。")
+       if st.button("新規登録する"):
+    if meaning_input.strip():
+        all_df = load_all_data()
+
+        new_index = add_word(
+            all_df,
+            user_id,
+            password,
+            word_input,
+            meaning_input
+        )
+
+        # 登録した単語をすぐ表示する
+        st.session_state["active_index"] = new_index
+        st.session_state["edit_open"] = False
+        st.session_state["last_search_word"] = word_input
+
+        st.rerun()
+
+    else:
+        st.warning("意味を入力してください。")
 
 
 # --------------------
@@ -457,11 +528,15 @@ if user_df.empty:
     st.write("まだ単語が登録されていません。")
 
 else:
-    sort_mode = st.radio(
-        "並び替え",
-        ["アルファベット順", "確認回数が多い順"],
-        horizontal=True
-    )
+sort_mode = st.radio(
+    "並び替え",
+    [
+        "アルファベット順",
+        "登録順（新しい順）",
+        "確認回数が多い順"
+    ],
+    horizontal=True
+)
 
     sorted_user_df = get_sorted_df(user_df, sort_mode)
 
