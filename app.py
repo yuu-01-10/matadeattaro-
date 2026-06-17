@@ -473,7 +473,7 @@ if word_input:
 
         meaning_input = st.text_area("意味を入力してください")
 
-       if st.button("新規登録する"):
+if st.button("新規登録する"):
     if meaning_input.strip():
         all_df = load_all_data()
 
